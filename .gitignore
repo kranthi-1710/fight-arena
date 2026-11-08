@@ -3,4 +3,3 @@ __pycache__/
 *.pyc
 .env
 fight_arena.db
-__pycache__/

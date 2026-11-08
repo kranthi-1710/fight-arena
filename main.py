@@ -1,8 +1,8 @@
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from security import hash_password
-from security import verify_password
+from security import hash_password, verify_password, create_access_token, decode_access_token
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from database import engine, Base, SessionLocal
 import models
@@ -19,6 +19,25 @@ def get_db():
     finally:
         db.close()
 
+
+bearer_scheme = HTTPBearer()
+
+
+def get_current_player(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+):
+    username = decode_access_token(credentials.credentials)
+    if username is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    player = db.query(models.Player).filter(
+        models.Player.username == username
+    ).first()
+    if player is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    return player
 
 class PlayerCreate(BaseModel):
     username: str
@@ -53,7 +72,9 @@ def create_player(player: PlayerCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Username already taken")
 
     new_player = models.Player(
-        username=player.username, character=player.character, hashed_password=hash_password(player.password)
+        username=player.username,
+        character=player.character,
+        hashed_password=hash_password(player.password)
     )
     db.add(new_player)
     db.commit()
@@ -75,4 +96,10 @@ def login(credentials: PlayerLogin, db: Session = Depends(get_db)):
     if not player or not verify_password(credentials.password, player.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    return {"message": f"Welcome, {player.username}!"}
+    token = create_access_token(player.username)
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@app.get("/me", response_model=PlayerOut)
+def read_me(current_player: models.Player = Depends(get_current_player)):
+    return current_player
