@@ -1,24 +1,58 @@
+from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
-from fastapi import FastAPI
+from sqlalchemy.orm import Session
+
+from database import engine, Base, SessionLocal
+import models
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+class PlayerCreate(BaseModel):
+    username: str
+    character: str
+
+
+class PlayerOut(BaseModel):
+    id: int
+    username: str
+    character: str
+    rating: int
+    model_config = {"from_attributes": True}
+
 
 @app.get("/")
 def home():
     return {"message": "Welcome to the Fight Arena"}
 
-class player(BaseModel):
-    username : str
-    character: str
 
-players = []
+@app.post("/players", response_model=PlayerOut)
+def create_player(player: PlayerCreate, db: Session = Depends(get_db)):
+    existing = db.query(models.Player).filter(
+        models.Player.username == player.username
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already taken")
 
-@app.post("/players")
-def create_player(player: player):
-    players.append(player)
-    return player
+    new_player = models.Player(
+        username=player.username, character=player.character
+    )
+    db.add(new_player)
+    db.commit()
+    db.refresh(new_player)
+    return new_player
 
-@app.get("/players")
-def list_players():
-    return players
 
+@app.get("/players", response_model=list[PlayerOut])
+def list_players(db: Session = Depends(get_db)):
+    return db.query(models.Player).all()
